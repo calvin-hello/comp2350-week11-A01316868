@@ -35,6 +35,34 @@
 						</div>
 					<% } %>
 
+					<form action="addPet" method="post">
+						<input type="hidden" name="user_id" value="<%= user_id %>"/>
+						<div class="field is-horizontal">
+						  <div class="field-label is-normal">
+							<label class="label">Add New Pet</label>
+						  </div>
+						  <div class="field-body">
+							<div class="field">
+							  <p class="control is-expanded">
+								<input name="pet_name" class="input" type="text" placeholder="Pet Name">
+							  </p>
+							</div>
+							<div class="field">
+								<p class="control is-expanded">
+								  <input name="pet_type" class="input" type="text" placeholder="Pet Type">
+								</p>
+							</div>
+							<div class="field">
+								<button class="button is-link">
+									<span>Add</span>
+									<span class="icon is-small">
+										<i class="fas fa-paw"></i>
+									</span>
+								</button>
+							</div>
+						  </div>
+						</div>
+					</form>
 				</div>
 			</div>
 		</section>

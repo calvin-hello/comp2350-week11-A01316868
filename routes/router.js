@@ -1,5 +1,7 @@
 const router = require('express').Router();
 const database = include('databaseConnection');
+const { ObjectId } = require('mongodb');
+const Joi = require('joi');
 //const dbModel = include('databaseAccessLayer');
 //const dbModel = include('staticData');
 
@@ -35,49 +37,58 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/pets', async (req, res) => {
-	console.log("page hit");
 	try {
-		const pets = await petModel.findAll({attributes: ['name']}); //{where: {web_user_id: 1}}
-		if (pets === null) {
-			res.render('error', {message: 'Error connecting to MySQL'});
-			console.log("Error connecting to userModel");
-		}
-		else {
-			console.log(pets);
-			res.render('pets', {allPets: pets});
-		}
+		console.log("page hit");
+
+		const petCollection = database.db('lab_example').collection('pets');
+		const pets = await petCollection.find().toArray();
+
+		res.render('pets', { allPets: pets });
 	}
-	catch(ex) {
-		res.render('error', {message: 'Error connecting to MySQL'});
-		console.log("Error connecting to MySQL");
+	catch (ex) {
+		res.render('error', { message: 'Error connecting to Database' });
 		console.log(ex);
 	}
 });
 
 
-
 router.get('/showPets', async (req, res) => {
-	console.log("page hit");
 	try {
-		let userId = req.query.id;
-		const user = await userModel.findByPk(userId); 
-		if (user === null) {
-			res.render('error', {message: 'Error connecting to MySQL'});
-			console.log("Error connecting to userModel");
+		console.log("page hit");
+
+		const userId = req.query.id;
+
+		const schema = Joi.string().length(24).required();
+		const validationResult = schema.validate(userId);
+
+		if (validationResult.error) {
+			console.log(validationResult.error);
+			return res.render('error', { message: 'Invalid user ID' });
 		}
-		else {
-			let pets = await user.getPets();
-			console.log(pets);
-			let owner = await pets[0].getOwner();
-			console.log(owner);
-			
-			res.render('pets', {allPets: pets});
+
+		const userCollection = database.db('lab_example').collection('users');
+		const petCollection = database.db('lab_example').collection('pets');
+
+		const userObjectId = new ObjectId(userId);
+
+		const user = await userCollection.findOne({ _id: userObjectId });
+
+		if (!user) {
+			return res.render('error', { message: 'User not found' });
 		}
-	}
-	catch(ex) {
-		res.render('error', {message: 'Error connecting to MySQL'});
-		console.log("Error connecting to MySQL");
+
+		const pets = await petCollection.find({ user_id: userObjectId }).toArray();
+
+		console.log(pets);
+
+		res.render('pets', {
+			allPets: pets,
+			owner: user,
+			user_id: userId
+		});
+	} catch (ex) {
 		console.log(ex);
+		res.render('error', { message: 'Error connecting to Database' });
 	}
 });
 
@@ -85,57 +96,108 @@ router.get('/deleteUser', async (req, res) => {
 	try {
 		console.log("delete user");
 
+		const userCollection = database.db('lab_example').collection('users');
 		let userId = req.query.id;
-		if (userId) {
-			console.log("userId: "+userId);
-			let deleteUser = await userModel.findByPk(userId);
-			console.log("deleteUser: ");
-			console.log(deleteUser);
-			// if (deleteUser !== null) {
-			// 	await deleteUser.destroy();
-			// }
+
+		//validation 
+		const schema = Joi.string().length(24).required(); // Mongo ObjectId = 24 chars
+
+		const validationResult = schema.validate(req.query.id);
+
+		if (validationResult.error != null) {
+			console.log(validationResult.error);
+			return res.render('error', { message: 'Invalid ID' });
 		}
+
+		if (userId) {
+			await userCollection.deleteOne({ _id: new ObjectId(userId) });
+		}
+
 		res.redirect("/");
 	}
-	catch(ex) {
-		res.render('error', {message: 'Error connecting to MySQL'});
-		console.log("Error connecting to MySQL");
-		console.log(ex);	
+	catch (ex) {
+		res.render('error', {message: 'Error connecting to Database'});
+		console.log("Error connecting to Database");
+		console.log(ex);
 	}
 });
 
 router.post('/addUser', async (req, res) => {
 	try {
 		console.log("form submit");
+		//user input validation
+		const schema = Joi.object({
+			first_name: Joi.string().alphanum().min(2).max(50).required(),
+			last_name: Joi.string().alphanum().min(2).max(50).required(),
+			email: Joi.string().email().max(150).required(),
+			password: Joi.string().min(8).max(30).required()
+		});
+
+		const validationResult = schema.validate(req.body);
+
+		if (validationResult.error != null) {
+			console.log(validationResult.error);
+			return res.render('error', { message: 'Invalid user input' });
+		}
+		const userCollection = database.db('lab_example').collection('users');
 
 		const password_salt = crypto.createHash('sha512');
-
 		password_salt.update(uuid());
-		
+
+		const saltHex = password_salt.digest('hex');
+
 		const password_hash = crypto.createHash('sha512');
+		password_hash.update(req.body.password + passwordPepper + saltHex);
 
-		password_hash.update(req.body.password+passwordPepper+password_salt);
+		const hashHex = password_hash.digest('hex');
 
+		await userCollection.insertOne({
+			first_name: req.body.first_name,
+			last_name: req.body.last_name,
+			email: req.body.email,
+			password_salt: saltHex,
+			password_hash: hashHex
+		});
 
-		let newUser = userModel.build(
-			{	
-				first_name: req.body.first_name,
-				last_name: req.body.last_name,
-				email: req.body.email,
-				password_salt: password_salt.digest('hex'),
-				password_hash: password_hash.digest('hex')
-			}
-		);
-		await newUser.save();
 		res.redirect("/");
 	}
-	catch(ex) {
-		res.render('error', {message: 'Error connecting to MySQL'});
-		console.log("Error connecting to MySQL");
-		console.log(ex);	
+	catch (ex) {
+		res.render('error', {message: 'Error connecting to Database'});
+		console.log("Error connecting to Database");
+		console.log(ex);
 	}
 });
 
+router.post('/addPet', async (req, res) => {
+	try {
+		const schema = Joi.object({
+			user_id: Joi.string().length(24).required(),
+			pet_name: Joi.string().min(1).max(50).required(),
+			pet_type: Joi.string().min(1).max(50).required()
+		});
+
+		const validationResult = schema.validate(req.body);
+
+		if (validationResult.error != null) {
+			console.log(validationResult.error);
+			return res.render('error', { message: 'Invalid pet input' });
+		}
+
+		const petCollection = database.db('lab_example').collection('pets');
+
+		await petCollection.insertOne({
+			name: req.body.pet_name,
+			pet_type: req.body.pet_type,
+			user_id: new ObjectId(req.body.user_id)
+		});
+
+		res.redirect('/showPets?id=' + req.body.user_id);
+	}
+	catch (ex) {
+		res.render('error', { message: 'Error connecting to Database' });
+		console.log(ex);
+	}
+});
 /*
 router.get('/', (req, res) => {
 	console.log("page hit");
